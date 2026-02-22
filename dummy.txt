@@ -1,0 +1,237 @@
+#include "EventDrivenSimulation.h"
+
+int EventDrivenSimulation::atcIdCounter = 1;  // this is our static counter
+
+EventDrivenSimulation:: EventDrivenSimulation(string fileName, int runway)
+{
+    runwayNum =runway;
+    priorityQueue = new GenericList(); // this is the event queue
+    queue = new GenericList(); // this is the waiting queue
+    inputFile.open(fileName);  // opening the file for reading
+    //Intialising everything
+
+    wastedTime =0;
+    globalClock =0;
+
+    runways = new bool[runwayNum]; //creating an array of bools
+    for(int i=0; i<runwayNum; i++)
+    {
+        runways[i]= true; // by default all runways are free
+    }
+    read(); // we read the first line of the file
+}
+void EventDrivenSimulation::read()
+{
+	string line;
+	//cout << "The first line of the file contains the following information: " << endl;
+	if(getline(inputFile, line))  //gets the next line from the file and saves it in 'line', if there is one // if this is false means eof is reached
+	{
+		stringstream sst(line);  //stringstream allows us to parse the line token by token (kind of like a Scanner in Java)
+		string token;
+		int time = 0;
+		string callSign = "";
+		string flightNum = "";
+		string size = "";
+		string requestType = "";
+		
+		sst >> token;  //grabbing the next token (reading time)
+		time = stoi(token); //converting time (string format) to an int
+		sst >> callSign;  //grabbing the next token (reading call sign)
+		sst >> flightNum;  //grabbing the next token (reading flight number)
+		sst >> size;  //grabbing the next token (reading plane size)
+		sst >> requestType;  //grabbing the next token (reading request type, either landing or takeoff)
+
+Plane* p = new Plane (callSign, stoi(flightNum), size, requestType, atcIdCounter++); // we increase the counter by one each tim ewe create a plane
+
+if(requestType == "landing") 
+{
+    //we create a new Request Event and add it to the event queue
+priorityQueue->insertOrdered(new RequestLanding(time, p)); // adding that event to the priority queue
+}
+else if(requestType == "takeoff") // we create a new request Takeoff event
+{
+priorityQueue->insertOrdered(new RequestTakeOff(time, p)); // adding that event to the priority queue
+}
+	}
+}
+  void EventDrivenSimulation:: run()
+    {
+        cout << "Simulation begins.... \n";
+        while(!priorityQueue->isEmpty()) //untile the priority queue is not empoty
+        {
+            
+            Event* e = priorityQueue->dequeue(); // we remove the first element of the priority queue 
+            globalClock = e->getTime(); // right now time 1 for delta 1234
+            if(dynamic_cast<RequestTakeOff*>(e))
+            {
+                doRequestTakeoff(e);
+            }
+            else if(dynamic_cast<RequestLanding*>(e))
+            {
+                doRequestLanding(e);
+            }
+            else if(dynamic_cast<Landing*>(e))
+            {
+                doLanding(e);
+            }
+            else if(dynamic_cast<TakeOff*>(e))
+            {
+                doTakeOff(e);
+            }
+            else if(dynamic_cast<Complete*>(e))
+            {
+                doComplete(e);
+            }
+        }
+    cout << "Simulation ends at time " << globalClock << ".\n";
+    cout << "Total Wasted Time: " << wastedTime << " minutes.\n";
+    }
+
+void EventDrivenSimulation:: doRequestTakeoff(Event* e)
+{
+    cout<< "Time: "<< globalClock << "->";
+    e->processEvent(); // cout the details of the event
+    if(runwayNum>0) // meaning the runway is available
+    {
+        priorityQueue->insertOrdered(new TakeOff(globalClock, e->getPlane())); // we create a  takeoff event
+        runwayNum--; // reduces the available runways by 1
+    }
+    else
+    { // lets say if a runway is already in use we can still put in into the waiting queu
+        queue->addBack(e);
+    }
+  
+    //if (!inputFile.eof()) {
+        read(); // we read the next line and insert the event in that order into the event List
+    //}
+ }
+void EventDrivenSimulation:: doRequestLanding(Event*e)
+{
+    cout<< "Time: "<< globalClock << "->";
+    e->processEvent();
+    if(runwayNum>0)
+    {
+        priorityQueue->insertOrdered(new Landing(globalClock, e->getPlane()));
+        runwayNum--;
+    }
+    else
+    {
+        queue->addBack(e);
+    }
+    //if (!inputFile.eof()) {
+        read();
+    //}
+}
+void EventDrivenSimulation:: doLanding(Event* e)
+{
+    cout<< "Time: "<< globalClock << "->";
+    //if(runwayNum>0){ //We may Remove this later on to see what does it looklike
+    int extra = 1 + 2 + getSizeTime(e->getPlane()); //1+ 2 minutes for landing + the extra time due to turbulence of plane due to size
+    int waste = globalClock - e->getTime();
+    wastedTime += waste;
+    e->processEvent();
+
+    int actualRunway = 0; /// we might change this logic later on
+    for(int i=0; i< runwayNum; i++)
+    {
+        if(runways[i]) // we select the first Runway which is true
+        {
+            runways[i]= false; //set it to false
+            actualRunway = i +1; // +1 cozz runway starts from 0 okkk
+            break; 
+        }
+    }
+
+
+    cout<< actualRunway <<"(time req. for Landing: " << extra << ")" << endl; // this is used to print the extra required time
+    // we still need to check is runway NUm righT??
+    priorityQueue->insertOrdered(new Complete(globalClock + extra, e->getPlane(), actualRunway)); // insert a complete event at this time in the event list
+    //  runwayNum--; // Lets see what this does maybe remove later on !!!
+    //}
+}
+
+void EventDrivenSimulation:: doTakeOff(Event* e)
+{
+    cout<< "Time: "<< globalClock << "->";
+    int extra = 1 + getSizeTime(e->getPlane());
+    int waste = globalClock - e->getTime();
+    wastedTime += waste;
+      e->processEvent();
+
+    int actualRunway = 0; /// we might change this logic later on
+    for(int i=0; i< runwayNum; i++)
+    {
+        if(runways[i]) // we select the first Runway which is true
+        {
+            runways[i]= false; //set it to false
+            actualRunway = i + 1; // +1 cozz runway starts from 0 okkk
+            break; 
+        }
+    }
+
+    cout<< actualRunway <<"(time req. for takeoff: " << extra << ")" << endl;// this is used to print the extra required time
+    priorityQueue->insertOrdered(new Complete(globalClock + extra, e->getPlane(), actualRunway));
+}
+
+void EventDrivenSimulation:: doComplete(Event* e)
+{
+    cout<< "Time: "<< globalClock << "->";
+    e->processEvent();
+    runwayNum ++; //the runway has become free increment the count
+    if(!queue->isEmpty()) // if the waiting line has not become empty
+    // means there is already someone in th efront of the waiting line
+    {
+        Event* e = queue->dequeue(); // we remove the element from the waiting queue
+        if(dynamic_cast<RequestTakeOff*>(e))
+        {
+            // doRequestTakeoff(e); // we start the request takeoff prcess again for this event now
+            priorityQueue->insertOrdered(new TakeOff(globalClock, e->getPlane()));  // See the Queue and see there is still
+            //any takeoff event which was sent to queue is not yet inserted to the event List
+            runwayNum--; 
+        }
+        else if(dynamic_cast<RequestLanding*>(e))
+        {
+            // doRequestLanding(e); // this will kinda trigger events after events
+            priorityQueue->insertOrdered(new Landing(globalClock,e->getPlane()));
+            runwayNum--;
+        }
+    }
+}
+int EventDrivenSimulation:: getSizeTime(Plane* p)
+{
+    if(p->getSize() == "small")
+    {
+        return 0;
+    }
+    else if(p->getSize()== "large")
+    {
+        return 1;
+    }
+    else if(p->getSize() == "heavy")
+    {
+        return 2;
+    }
+    else if(p->getSize() == "super")
+    {
+        return 3;
+    }
+
+    return 0;
+}
+
+//Destructor deletes the lists ad close the file
+EventDrivenSimulation::~EventDrivenSimulation() 
+{
+    delete queue;
+    delete priorityQueue;
+    inputFile.close();
+}
+
+
+/*
+g++ -std=c++11 -o simulation main.cpp EventDrivenSimulation.cpp GenericList.cpp Node.cpp \
+Event.cpp RequestLanding.cpp RequestTakeOff.cpp Landing.cpp TakeOff.cpp Complete.cpp Plane.cpp
+
+
+./simulation input.txt 1
+*/
